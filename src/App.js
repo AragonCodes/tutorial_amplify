@@ -1,13 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import './App.css';
 import '@aws-amplify/ui-react/styles.css';
-import { API } from 'aws-amplify';
+import { API, Storage } from 'aws-amplify';
 import {
   Button,
   Flex,
   Heading,
   Text,
   TextField,
+  Image,
   View,
   withAuthenticator,
 } from '@aws-amplify/ui-react';
@@ -18,7 +19,7 @@ import {
 } from './graphql/mutations';
 
 const App = ({ signOut }) => {
-  const [notes, setTodos] = useState([]);
+  const [todos, setTodos] = useState([]);
 
   useEffect(() => {
     fetchTodos();
@@ -26,17 +27,28 @@ const App = ({ signOut }) => {
 
   async function fetchTodos() {
     const apiData = await API.graphql({ query: listTodos });
-    const notesFromAPI = apiData.data.listTodos.items;
-    setTodos(notesFromAPI);
+    const todosFromAPI = apiData.data.listTodos.items;
+    await Promise.all(
+      todosFromAPI.map(async (todo) => {
+        if (todo.image) {
+          const url = await Storage.get(todo.name);
+          todo.image = url;
+        }
+      })
+    );
+    setTodos(todosFromAPI);
   }
 
   async function createTodo(event) {
     event.preventDefault();
     const form = new FormData(event.target);
+    const image = form.get('image');
     const data = {
       name: form.get('name'),
       description: form.get('description'),
+      image: image.name,
     };
+    if (!!data.image) await Storage.put(data.name, image);
     await API.graphql({
       query: createTodoMutation,
       variables: { input: data },
@@ -45,9 +57,10 @@ const App = ({ signOut }) => {
     event.target.reset();
   }
 
-  async function deleteTodo({ id }) {
-    const newTodos = notes.filter((note) => note.id !== id);
+  async function deleteTodo({ id, name }) {
+    const newTodos = todos.filter((todo) => todo.id !== id);
     setTodos(newTodos);
+    await Storage.remove(name);
     await API.graphql({
       query: deleteTodoMutation,
       variables: { input: { id } },
@@ -75,6 +88,12 @@ const App = ({ signOut }) => {
             variation='quiet'
             required
           />
+          <View
+            name='image'
+            as='input'
+            type='file'
+            style={{ alignSelf: 'end' }}
+          />
           <Button type='submit' variation='primary'>
             Create Todo
           </Button>
@@ -82,19 +101,26 @@ const App = ({ signOut }) => {
       </View>
       <Heading level={2}>Current Todos</Heading>
       <View margin='3rem 0'>
-        {notes.map((note) => (
+        {todos.map((todo) => (
           <Flex
-            key={note.id || note.name}
+            key={todo.id || todo.name}
             direction='row'
             justifyContent='center'
             alignItems='center'
           >
             <Text as='strong' fontWeight={700}>
-              {note.name}
+              {todo.name}
             </Text>
-            <Text as='span'>{note.description}</Text>
-            <Button variation='link' onClick={() => deleteTodo(note)}>
-              Delete note
+            <Text as='span'>{todo.description}</Text>
+            {todo.image && (
+              <Image
+                src={todo.image}
+                alt={`visual aid for ${todos.name}`}
+                style={{ width: 400 }}
+              />
+            )}
+            <Button variation='link' onClick={() => deleteTodo(todo)}>
+              Delete todo
             </Button>
           </Flex>
         ))}
